@@ -1,0 +1,11 @@
+User-Name="testuser-2"
+Acct-Status-Type=Stop
+Acct-Session-Id="session67890"
+NAS-IP-Address=192.168.1.1
+NAS-Port=1
+Calling-Station-Id="098-765-4321"
+Called-Station-Id="987-654-3210"
+Framed-IP-Address=10.0.0.101
+Acct-Input-Octets=2500000
+Acct-Output-Octets=750000
+Acct-Session-Time=7200

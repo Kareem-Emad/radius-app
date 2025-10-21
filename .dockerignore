@@ -1,0 +1,30 @@
+# Ignore test files
+acct_*.txt
+test_radius.sh
+README_testing.md
+
+# Ignore documentation
+*.pdf
+*.pdf.md
+
+# Ignore compiled binaries
+main
+radius-server
+
+# Ignore git files
+.git
+.gitignore
+
+# Ignore IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore temporary files
+*.tmp
+*.log

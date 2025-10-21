@@ -1,0 +1,57 @@
+# Multi-stage build for Redis consumer
+FROM golang:1.21-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY main.go ./
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o redis-consumer main.go
+
+# Final stage - minimal runtime image
+FROM alpine:latest
+
+# Install ca-certificates for HTTPS requests if needed
+RUN apk --no-cache add ca-certificates
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S consumer && \
+    adduser -u 1001 -S consumer -G consumer
+
+# Create log directory
+RUN mkdir -p /var/log && chown consumer:consumer /var/log
+
+WORKDIR /root/
+
+# Copy the binary from builder stage
+COPY --from=builder /app/redis-consumer .
+
+# Change ownership to consumer user
+RUN chown consumer:consumer redis-consumer
+
+# Switch to non-root user
+USER consumer
+
+# Health check to ensure the consumer is running
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD pgrep redis-consumer || exit 1
+
+# Default environment variables (can be overridden)
+ENV REDIS_HOST=redis
+ENV REDIS_PORT=6379
+ENV USERNAME=testuser-1
+ENV LOG_FILE=/var/log/radius_updates.log
+
+# Run the Redis consumer
+CMD ["./redis-consumer"]
