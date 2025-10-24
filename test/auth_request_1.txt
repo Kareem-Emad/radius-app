@@ -1,0 +1,6 @@
+User-Name = "testuser-1"
+User-Password = "testpass123"
+NAS-IP-Address = 192.168.1.1
+NAS-Port = 1
+Service-Type = Framed-User
+Framed-Protocol = PPP

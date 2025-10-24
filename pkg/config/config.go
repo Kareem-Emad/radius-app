@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type Config struct {
 
 	// Server configuration
 	ServerHost string
+
+	// User credentials for authentication
+	UserCredentials map[string]string
 }
 
 // LoadConfig reads environment variables and returns a populated Config struct
@@ -97,6 +101,28 @@ func LoadConfig() (*Config, error) {
 	// Server Host
 	if host := os.Getenv("SERVER_HOST"); host != "" {
 		config.ServerHost = host
+	}
+
+	// Load user credentials from environment variables
+	config.UserCredentials = make(map[string]string)
+
+	// Load user credentials in format "username:password,username:password,..."
+	if credentialsStr := os.Getenv("USER_CREDENTIALS"); credentialsStr != "" {
+		pairs := strings.Split(credentialsStr, ",")
+		for _, pair := range pairs {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			parts := strings.SplitN(pair, ":", 2)
+			if len(parts) == 2 {
+				username := strings.TrimSpace(parts[0])
+				password := strings.TrimSpace(parts[1])
+				if username != "" && password != "" {
+					config.UserCredentials[username] = password
+				}
+			}
+		}
 	}
 
 	return config, nil

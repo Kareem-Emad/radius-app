@@ -49,7 +49,7 @@ func InitializeDependencies(cfg *config.Config) (*Dependencies, error) {
 	secret := []byte(cfg.Secret)
 
 	// Create handlers
-	authHandler := auth.NewHandler(secret)
+	authHandler := auth.NewHandler(secret, cfg.UserCredentials)
 	acctHandler := accounting.NewHandler(datastoreClient, streamClient, cfg.AccountingTTL)
 
 	return &Dependencies{

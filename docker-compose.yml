@@ -13,6 +13,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - RADIUS_SECRET=testing123
+      - USER_CREDENTIALS=testuser-1:testpass123,testuser-2:testpass456
     networks:
       - radius-network
     restart: unless-stopped
@@ -91,6 +93,8 @@ services:
       - ./test/acct_start_2.txt:/test/acct_start_2.txt:ro
       - ./test/acct_stop_1.txt:/test/acct_stop_1.txt:ro
       - ./test/acct_stop_2.txt:/test/acct_stop_2.txt:ro
+      - ./test/auth_request_1.txt:/test/auth_request_1.txt:ro
+      - ./test/auth_request_2.txt:/test/auth_request_2.txt:ro
     command: >
       sh -c "
         apk add --no-cache freeradius-utils &&

@@ -59,6 +59,22 @@ The system is built with Go using clean architecture principles, dependency inje
 
 ### Send Test RADIUS Packets
 
+#### Authentication Tests (Port 1812)
+
+1. **Test authentication for testuser-1**:
+   ```bash
+   docker-compose exec radclient-test sh -c "echo 'testing123' | radclient -f /test/auth_request_1.txt radius-server:1812 auth testing123"
+   ```
+   Expected response: `Received Access-Accept` (user exists with correct password)
+
+2. **Test authentication for testuser-2**:
+   ```bash
+   docker-compose exec radclient-test sh -c "echo 'testing123' | radclient -f /test/auth_request_2.txt radius-server:1812 auth testing123"
+   ```
+   Expected response: `Received Access-Accept` (user exists with correct password)
+
+#### Accounting Tests (Port 1813)
+
 1. **Send accounting start for testuser-1**:
    ```bash
    docker-compose exec radclient-test sh -c "echo 'testing123' | radclient -f /test/acct_start_1.txt radius-server:1813 acct testing123"
@@ -84,9 +100,18 @@ The system is built with Go using clean architecture principles, dependency inje
 docker-compose logs radius-server
 ```
 Look for:
-- `Connected to Redis at redis:6379`
+- `Connected to Redis at redis:6379`  
+- `RADIUS Secret configured: testing123`
 - `Starting Authentication server on :1812`
 - `Starting Accounting server on :1813`
+
+**Authentication Success Logs**:
+- `[AUTH] Received Access-Request from <IP> for user: testuser-1`
+- `[AUTH] Access granted for user: testuser-1`
+
+**Authentication Failure Logs**:
+- `[AUTH] Access denied for user: <username> (user not found)`
+- `[AUTH] Access denied for user: <username> (invalid password)`
 
 **Consumer logs**:
 ```bash
@@ -133,6 +158,13 @@ docker-compose exec redis-consumer-1 cat /var/log/radius_updates.log
 
 ### Expected Test Flow
 
+#### Authentication Flow (Port 1812)
+1. **Auth Request**: radclient sends Access-Request to RADIUS server
+2. **User Validation**: Server validates username/password against configured credentials
+3. **Response**: Server returns Access-Accept (valid user) or Access-Reject (invalid)
+4. **Verification**: Check server logs for authentication success/failure messages
+
+#### Accounting Flow (Port 1813)
 1. **Packet Sent**: radclient sends accounting packet to RADIUS server
 2. **Server Processing**: RADIUS server receives packet, stores data in Redis, publishes to stream
 3. **Stream Delivery**: Redis stream delivers message to appropriate consumer group
@@ -167,6 +199,8 @@ dni/
 │       ├── interface.go   # Stream interface
 │       └── redis.go      # Redis Streams implementation
 ├── test/                 # Test files and data
+│   ├── auth_request_1.txt # Test authentication for testuser-1
+│   ├── auth_request_2.txt # Test authentication for testuser-2
 │   ├── acct_start_1.txt  # Test accounting start packets
 │   ├── acct_start_2.txt
 │   ├── acct_stop_1.txt   # Test accounting stop packets
@@ -221,7 +255,9 @@ All services are configured via environment variables:
 **Server Configuration**:
 - `REDIS_HOST`, `REDIS_PORT`: Redis connection
 - `AUTH_PORT`, `ACCT_PORT`: RADIUS server ports
-- `SECRET`: RADIUS shared secret
+- `RADIUS_SECRET`: RADIUS shared secret (default: "testing123")
+- `USER_CREDENTIALS`: User authentication credentials in format "username:password,username:password,..." 
+  - Example: "testuser-1:testpass123,testuser-2:testpass456"
 - `ACCOUNTING_TTL`: Data retention period
 
 **Consumer Configuration**:
