@@ -17,7 +17,7 @@ RUN go mod download
 COPY . ./
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o radius-server .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o radius-server ./cmd/api
 
 # Final stage - minimal runtime image
 FROM alpine:latest

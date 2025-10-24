@@ -7,7 +7,15 @@ type StreamMessage struct {
 	Data     map[string]interface{}
 }
 
-// Stream interface defines methods for publishing messages to streams
+// ConsumerConfig holds configuration for stream consumers
+type ConsumerConfig struct {
+	StreamKey     string
+	ConsumerGroup string
+	ConsumerName  string
+}
+
+// Stream interface defines methods for publishing and consuming messages from streams
 type Stream interface {
 	Push(streamKey string, message StreamMessage) error
+	Pull(config ConsumerConfig) ([]string, error)
 }

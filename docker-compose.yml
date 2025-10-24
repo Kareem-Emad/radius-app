@@ -45,8 +45,8 @@ services:
   # Redis Consumer for testuser-1
   redis-consumer-1:
     build: 
-      context: ./consumer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.consumer
     container_name: radius-consumer-1
     depends_on:
       - redis
@@ -64,8 +64,8 @@ services:
   # Redis Consumer for testuser-2
   redis-consumer-2:
     build: 
-      context: ./consumer
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: Dockerfile.consumer
     container_name: radius-consumer-2
     depends_on:
       - redis

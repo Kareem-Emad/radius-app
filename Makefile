@@ -2,7 +2,7 @@
 
 # Variables
 SERVER_MAIN=./cmd/api
-CONSUMER_MAIN=./consumer
+CONSUMER_MAIN=./cmd/consumer
 
 # Default target
 .DEFAULT_GOAL := help
@@ -21,7 +21,7 @@ run-consumer: ## Run the Redis consumer (requires USERNAME env var)
 		echo "Usage: make run-consumer USERNAME=testuser-1"; \
 		exit 1; \
 	fi
-	@cd $(CONSUMER_MAIN) && USERNAME=$(USERNAME) go run .
+	@USERNAME=$(USERNAME) go run $(CONSUMER_MAIN)
 
 # Help target
 .PHONY: help

@@ -9,11 +9,13 @@ import (
 	"syscall"
 	"time"
 
+	"dni/pkg/stream"
+
 	"github.com/go-redis/redis/v8"
 )
 
 type Consumer struct {
-	client       *redis.Client
+	streamClient stream.Stream
 	username     string
 	logFile      string
 	streamKey    string
@@ -32,8 +34,10 @@ func NewConsumer(redisHost, redisPort, username, logFile string) *Consumer {
 		DB:       0, // default DB
 	})
 
+	streamClient := stream.NewRedisStream(rdb)
+
 	return &Consumer{
-		client:       rdb,
+		streamClient: streamClient,
 		username:     username,
 		logFile:      logFile,
 		streamKey:    fmt.Sprintf("radius:updates:%s", username),
@@ -68,46 +72,14 @@ func (c *Consumer) writeLog(message string) error {
 	return nil
 }
 
-func (c *Consumer) createConsumerGroup() error {
-	err := c.client.XGroupCreateMkStream(c.ctx, c.streamKey, c.groupName, "0").Err()
-	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
-		return fmt.Errorf("failed to create consumer group: %v", err)
+func (c *Consumer) processKeys(keys []string) error {
+	for _, key := range keys {
+		logMessage := fmt.Sprintf("Received update for key: %s", key)
+		if err := c.writeLog(logMessage); err != nil {
+			return fmt.Errorf("failed to write log: %v", err)
+		}
+		log.Printf("[%s] %s", c.username, logMessage)
 	}
-	log.Printf("Consumer group '%s' created/verified for stream '%s'", c.groupName, c.streamKey)
-	return nil
-}
-
-func (c *Consumer) connectWithRetry() error {
-
-	_, err := c.client.Ping(c.ctx).Result()
-	if err == nil {
-		log.Printf("Successfully connected to Redis")
-		return nil
-	}
-
-	log.Printf("Failed to connect to Redis: %v", err)
-
-	return fmt.Errorf("failed to connect to Redis")
-}
-
-func (c *Consumer) processMessage(msg redis.XMessage) error {
-	keyName, exists := msg.Values["key"]
-	if !exists {
-		return fmt.Errorf("no 'key' field in message")
-	}
-
-	logMessage := fmt.Sprintf("Received update for key: %s", keyName)
-	if err := c.writeLog(logMessage); err != nil {
-		return fmt.Errorf("failed to write log: %v", err)
-	}
-
-	log.Printf("[%s] %s", c.username, logMessage)
-
-	err := c.client.XAck(c.ctx, c.streamKey, c.groupName, msg.ID).Err()
-	if err != nil {
-		return fmt.Errorf("failed to acknowledge message: %v", err)
-	}
-
 	return nil
 }
 
@@ -116,12 +88,10 @@ func (c *Consumer) Start() error {
 	log.Printf("Stream key: %s", c.streamKey)
 	log.Printf("Log file: %s", c.logFile)
 
-	if err := c.connectWithRetry(); err != nil {
-		return err
-	}
-
-	if err := c.createConsumerGroup(); err != nil {
-		return err
+	config := stream.ConsumerConfig{
+		StreamKey:     c.streamKey,
+		ConsumerGroup: c.groupName,
+		ConsumerName:  c.consumerName,
 	}
 
 	log.Printf("Consumer group '%s' ready", c.groupName)
@@ -132,37 +102,21 @@ func (c *Consumer) Start() error {
 			log.Printf("Consumer shutting down...")
 			return nil
 		default:
-			msgs, err := c.client.XReadGroup(c.ctx, &redis.XReadGroupArgs{
-				Group:    c.groupName,
-				Consumer: c.consumerName,
-				Streams:  []string{c.streamKey, ">"},
-				Count:    1,
-				Block:    time.Second * 5,
-			}).Result()
-
+			keys, err := c.streamClient.Pull(config)
 			if err != nil {
-				if err == redis.Nil {
-					continue
-				}
-
 				log.Printf("Error reading from stream: %v", err)
-
-				// Try to reconnect
-				if err := c.connectWithRetry(); err != nil {
-					log.Printf("Failed to reconnect: %v", err)
-					time.Sleep(time.Second * 5)
-					continue
-				}
+				time.Sleep(time.Second * 5)
 				continue
 			}
 
-			for _, stream := range msgs {
-				for _, msg := range stream.Messages {
-					if err := c.processMessage(msg); err != nil {
-						log.Printf("Error processing message %s: %v", msg.ID, err)
-					}
+			if len(keys) > 0 {
+				if err := c.processKeys(keys); err != nil {
+					log.Printf("Error processing keys: %v", err)
 				}
 			}
+
+			// Small delay to prevent busy waiting
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
@@ -170,7 +124,6 @@ func (c *Consumer) Start() error {
 func (c *Consumer) Stop() {
 	log.Printf("Stopping consumer...")
 	c.cancel()
-	c.client.Close()
 }
 
 func main() {
