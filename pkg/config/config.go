@@ -101,3 +101,61 @@ func LoadConfig() (*Config, error) {
 
 	return config, nil
 }
+
+// ConsumerConfig holds all configuration values for the Redis consumer
+type ConsumerConfig struct {
+	// Redis configuration
+	RedisHost string
+	RedisPort int
+
+	// Consumer configuration
+	Username string
+	LogFile  string
+
+	// Stream configuration
+	StreamKey     string
+	ConsumerGroup string
+	ConsumerName  string
+}
+
+// LoadConsumerConfig reads environment variables and returns a populated ConsumerConfig struct
+func LoadConsumerConfig() (*ConsumerConfig, error) {
+	config := &ConsumerConfig{
+		// Default values
+		RedisHost: "localhost",
+		RedisPort: 6379,
+		LogFile:   "/var/log/radius_updates.log",
+	}
+
+	// Redis Host
+	if host := os.Getenv("REDIS_HOST"); host != "" {
+		config.RedisHost = host
+	}
+
+	// Redis Port
+	if portStr := os.Getenv("REDIS_PORT"); portStr != "" {
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			return nil, fmt.Errorf("invalid REDIS_PORT: %v", err)
+		}
+		config.RedisPort = port
+	}
+
+	// Username (required)
+	config.Username = os.Getenv("USERNAME")
+	if config.Username == "" {
+		return nil, fmt.Errorf("USERNAME environment variable is required")
+	}
+
+	// Log File
+	if logFile := os.Getenv("LOG_FILE"); logFile != "" {
+		config.LogFile = logFile
+	}
+
+	// Generate stream-related configuration based on username
+	config.StreamKey = fmt.Sprintf("radius:updates:%s", config.Username)
+	config.ConsumerGroup = fmt.Sprintf("consumer-group-%s", config.Username)
+	config.ConsumerName = fmt.Sprintf("consumer-%s-%d", config.Username, os.Getpid())
+
+	return config, nil
+}

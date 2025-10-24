@@ -1,79 +1,41 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"sync"
 
 	"dni/pkg/config"
-	"dni/internal/accounting"
-	"dni/internal/auth"
-	"dni/pkg/datastore"
-	"dni/pkg/stream"
 
-	"github.com/go-redis/redis/v8"
 	"layeh.com/radius"
 )
 
-var redisClient *redis.Client
-var ctx = context.Background()
-var datastoreClient datastore.Datastore
-var streamClient stream.Stream
-var cfg *config.Config
-
-func initRedis(config *config.Config) error {
-	redisAddr := fmt.Sprintf("%s:%d", config.RedisHost, config.RedisPort)
-	redisClient = redis.NewClient(&redis.Options{
-		Addr:     redisAddr,
-		Password: config.RedisPassword,
-		DB:       config.RedisDB,
-	})
-
-	_, err := redisClient.Ping(ctx).Result()
-	if err != nil {
-		return fmt.Errorf("failed to connect to Redis: %v", err)
-	}
-
-	// Initialize the interface implementations
-	datastoreClient = datastore.NewRedisStore(redisClient)
-	streamClient = stream.NewRedisStream(redisClient)
-
-	log.Printf("Connected to Redis at %s", redisAddr)
-	return nil
-}
-
 func main() {
 	// Load configuration from environment variables
-	var err error
-	cfg, err = config.LoadConfig()
+	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Initialize Redis connection
-	if err := initRedis(cfg); err != nil {
-		log.Fatalf("Failed to initialize Redis: %v", err)
+	// Initialize all dependencies
+	deps, err := InitializeDependencies(cfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize dependencies: %v", err)
 	}
-	defer redisClient.Close()
+	defer deps.Close()
 
 	// Get secret from configuration
 	secret := []byte(cfg.Secret)
 
-	// Create handlers
-	authHandler := auth.NewHandler(secret)
-	acctHandler := accounting.NewHandler(datastoreClient, streamClient, cfg.AccountingTTL)
-
-	// Create servers
+	// Create servers using the initialized handlers
 	authServer := &radius.PacketServer{
 		Addr:         cfg.AuthPort,
-		Handler:      radius.HandlerFunc(authHandler.Handle),
+		Handler:      radius.HandlerFunc(deps.AuthHandler.Handle),
 		SecretSource: radius.StaticSecretSource(secret),
 	}
 
 	acctServer := &radius.PacketServer{
 		Addr:         cfg.AcctPort,
-		Handler:      radius.HandlerFunc(acctHandler.Handle),
+		Handler:      radius.HandlerFunc(deps.AcctHandler.Handle),
 		SecretSource: radius.StaticSecretSource(secret),
 	}
 
