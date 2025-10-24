@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 	"time"
+
+	"dni/config"
+	"dni/datastore"
+	"dni/stream"
 
 	"github.com/go-redis/redis/v8"
 	"layeh.com/radius"
@@ -16,22 +19,16 @@ import (
 
 var redisClient *redis.Client
 var ctx = context.Background()
+var datastoreClient datastore.Datastore
+var streamClient stream.Stream
+var cfg *config.Config
 
-func initRedis() error {
-	redisHost := os.Getenv("REDIS_HOST")
-	if redisHost == "" {
-		redisHost = "localhost"
-	}
-
-	redisPort := os.Getenv("REDIS_PORT")
-	if redisPort == "" {
-		redisPort = "6379"
-	}
-
+func initRedis(config *config.Config) error {
+	redisAddr := fmt.Sprintf("%s:%d", config.RedisHost, config.RedisPort)
 	redisClient = redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%s", redisHost, redisPort),
-		Password: "",
-		DB:       0, // default DB
+		Addr:     redisAddr,
+		Password: config.RedisPassword,
+		DB:       config.RedisDB,
 	})
 
 	_, err := redisClient.Ping(ctx).Result()
@@ -39,45 +36,42 @@ func initRedis() error {
 		return fmt.Errorf("failed to connect to Redis: %v", err)
 	}
 
-	log.Printf("Connected to Redis at %s:%s", redisHost, redisPort)
+	// Initialize the interface implementations
+	datastoreClient = datastore.NewRedisStore(redisClient)
+	streamClient = stream.NewRedisStream(redisClient)
+
+	log.Printf("Connected to Redis at %s", redisAddr)
 	return nil
 }
 
-func storeAccountingData(username, nasIPAddress, acctSessionId string, data map[string]interface{}) error {
-	key := fmt.Sprintf("radius:acct:%s:%s", username, acctSessionId)
+func storeAccountingData(record datastore.AccountingRecord) error {
+	key := fmt.Sprintf("radius:acct:%s:%s", record.Username, record.AcctSessionID)
 
-	log.Printf("[REDIS] Storing accounting data with key: %s", key)
+	log.Printf("[DATASTORE] Storing accounting data with key: %s", key)
 
-	err := redisClient.HMSet(ctx, key, data).Err()
+	err := datastoreClient.Save(key, record, cfg.AccountingTTL)
 	if err != nil {
 		return fmt.Errorf("failed to store accounting data: %v", err)
 	}
 
-	err = redisClient.Expire(ctx, key, 10*time.Minute).Err()
-	if err != nil {
-		log.Printf("[REDIS] Warning: failed to set TTL for key %s: %v", key, err)
-	}
-
-	log.Printf("[REDIS] Successfully stored accounting data for key: %s", key)
+	log.Printf("[DATASTORE] Successfully stored accounting data for key: %s", key)
 	return nil
 }
 
 func publishStreamNotification(username, key string) error {
 	streamKey := fmt.Sprintf("radius:updates:%s", username)
 
-	values := map[string]interface{}{
-		"key":       key,
-		"timestamp": time.Now().Unix(),
-		"username":  username,
+	message := stream.StreamMessage{
+		Key:      key,
+		Username: username,
+		Data: map[string]interface{}{
+			"timestamp": time.Now().Unix(),
+		},
 	}
 
 	log.Printf("[REDIS] Publishing to stream: %s", streamKey)
 
-	_, err := redisClient.XAdd(ctx, &redis.XAddArgs{
-		Stream: streamKey,
-		Values: values,
-	}).Result()
-
+	err := streamClient.Push(streamKey, message)
 	if err != nil {
 		return fmt.Errorf("failed to publish to stream %s: %v", streamKey, err)
 	}
@@ -87,14 +81,21 @@ func publishStreamNotification(username, key string) error {
 }
 
 func main() {
+	// Load configuration from environment variables
+	var err error
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
 	// Initialize Redis connection
-	if err := initRedis(); err != nil {
+	if err := initRedis(cfg); err != nil {
 		log.Fatalf("Failed to initialize Redis: %v", err)
 	}
 	defer redisClient.Close()
 
-	// Shared secret as specified in requirements
-	secret := []byte("testing123")
+	// Get secret from configuration
+	secret := []byte(cfg.Secret)
 
 	// Authentication handler for port 1812
 	authHandler := func(w radius.ResponseWriter, r *radius.Request) {
@@ -135,18 +136,18 @@ func main() {
 		log.Printf("[ACCT] Calling-Station-Id: %s", callingStationId)
 		log.Printf("[ACCT] Called-Station-Id: %s", calledStationId)
 
-		// Prepare data for Redis storage (convert all RADIUS types to basic types)
-		accountingData := map[string]interface{}{
-			"username":           username,
-			"nas_ip_address":     nasIPAddress.String(),
-			"nas_port":           fmt.Sprintf("%d", nasPort),
-			"acct_status_type":   fmt.Sprintf("%d", acctStatusType),
-			"acct_session_id":    acctSessionId,
-			"framed_ip_address":  framedIPAddress.String(),
-			"calling_station_id": callingStationId,
-			"called_station_id":  calledStationId,
-			"packet_type":        "Accounting-Request",
-			"timestamp":          fmt.Sprintf("%d", time.Now().Unix()),
+		// Create AccountingRecord struct
+		record := datastore.AccountingRecord{
+			Username:         username,
+			NASIPAddress:     nasIPAddress.String(),
+			NASPort:          fmt.Sprintf("%d", nasPort),
+			AcctStatusType:   fmt.Sprintf("%d", acctStatusType),
+			AcctSessionID:    acctSessionId,
+			FramedIPAddress:  framedIPAddress.String(),
+			CallingStationID: callingStationId,
+			CalledStationID:  calledStationId,
+			PacketType:       "Accounting-Request",
+			Timestamp:        fmt.Sprintf("%d", time.Now().Unix()),
 		}
 
 		if acctStatusType == rfc2866.AcctStatusType_Value_Stop {
@@ -158,12 +159,12 @@ func main() {
 			log.Printf("[ACCT] Acct-Output-Octets: %d", acctOutputOctets)
 			log.Printf("[ACCT] Acct-Session-Time: %d seconds", acctSessionTime)
 
-			accountingData["acct_input_octets"] = fmt.Sprintf("%d", acctInputOctets)
-			accountingData["acct_output_octets"] = fmt.Sprintf("%d", acctOutputOctets)
-			accountingData["acct_session_time"] = fmt.Sprintf("%d", acctSessionTime)
+			record.AcctInputOctets = fmt.Sprintf("%d", acctInputOctets)
+			record.AcctOutputOctets = fmt.Sprintf("%d", acctOutputOctets)
+			record.AcctSessionTime = fmt.Sprintf("%d", acctSessionTime)
 		}
 
-		if err := storeAccountingData(username, nasIPAddress.String(), acctSessionId, accountingData); err != nil {
+		if err := storeAccountingData(record); err != nil {
 			log.Printf("[REDIS] Error storing accounting data: %v", err)
 		} else {
 			recordKey := fmt.Sprintf("radius:acct:%s:%s", username, acctSessionId)
@@ -179,13 +180,13 @@ func main() {
 	}
 
 	authServer := &radius.PacketServer{
-		Addr:         ":1812",
+		Addr:         cfg.AuthPort,
 		Handler:      radius.HandlerFunc(authHandler),
 		SecretSource: radius.StaticSecretSource(secret),
 	}
 
 	acctServer := &radius.PacketServer{
-		Addr:         ":1813",
+		Addr:         cfg.AcctPort,
 		Handler:      radius.HandlerFunc(acctHandler),
 		SecretSource: radius.StaticSecretSource(secret),
 	}
@@ -193,19 +194,19 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Start authentication server (port 1812)
+	// Start authentication server
 	go func() {
 		defer wg.Done()
-		log.Printf("Starting Authentication server on :1812")
+		log.Printf("Starting Authentication server on %s", cfg.AuthPort)
 		if err := authServer.ListenAndServe(); err != nil {
 			log.Fatalf("Authentication server error: %v", err)
 		}
 	}()
 
-	// Start accounting server (port 1813)
+	// Start accounting server
 	go func() {
 		defer wg.Done()
-		log.Printf("Starting Accounting server on :1813")
+		log.Printf("Starting Accounting server on %s", cfg.AcctPort)
 		if err := acctServer.ListenAndServe(); err != nil {
 			log.Fatalf("Accounting server error: %v", err)
 		}

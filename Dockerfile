@@ -13,11 +13,11 @@ COPY go.mod go.sum ./
 # Download dependencies
 RUN go mod download
 
-# Copy source code
-COPY main.go ./
+# Copy all source code
+COPY . ./
 
 # Build the binary
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o radius-server main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o radius-server .
 
 # Final stage - minimal runtime image
 FROM alpine:latest
