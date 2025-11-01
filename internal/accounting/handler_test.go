@@ -106,4 +106,256 @@ func TestHandler_Handle_StartPacket(t *testing.T) {
 		t.Errorf("Expected AccountingResponse code, got %v", responseWriter.response.Code)
 	}
 
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("There were unfulfilled Redis expectations: %s", err)
+	}
+}
+
+func TestHandler_Handle_Scenarios(t *testing.T) {
+	// freezing time to avoid flaky tests
+	timecop.Travel(t, time.Unix(1, 0), timecop.Freeze)
+
+	tests := []struct {
+		name           string
+		username       string
+		sessionID      string
+		statusType     rfc2866.AcctStatusType
+		setupMock      func(mock redismock.ClientMock)
+		expectedResult bool // true = success, false = should handle errors gracefully
+	}{
+		{
+			name:       "START packet - successful flow",
+			username:   "testuser",
+			sessionID:  "session123",
+			statusType: rfc2866.AcctStatusType_Value_Start,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session123",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "1",
+					"acct_session_id", "session123",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+				).SetVal(true)
+
+				mock.ExpectExpire("radius:acct:testuser:session123", time.Hour).SetVal(true)
+
+				mock.ExpectXAdd(&redis.XAddArgs{
+					Stream: "radius:updates:testuser",
+					Values: []interface{}{
+						"key", "radius:acct:testuser:session123",
+						"timestamp", clock.Now().Unix(),
+						"username", "testuser",
+					},
+				}).SetVal("1-0")
+			},
+			expectedResult: true,
+		},
+		{
+			name:       "STOP packet - successful flow",
+			username:   "testuser",
+			sessionID:  "session456",
+			statusType: rfc2866.AcctStatusType_Value_Stop,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session456",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "2", // Stop = 2
+					"acct_session_id", "session456",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+					"acct_input_octets", "1024",
+					"acct_output_octets", "2048",
+					"acct_session_time", "3600",
+				).SetVal(true)
+
+				mock.ExpectExpire("radius:acct:testuser:session456", time.Hour).SetVal(true)
+
+				mock.ExpectXAdd(&redis.XAddArgs{
+					Stream: "radius:updates:testuser",
+					Values: []interface{}{
+						"key", "radius:acct:testuser:session456",
+						"timestamp", clock.Now().Unix(),
+						"username", "testuser",
+					},
+				}).SetVal("1-0")
+			},
+			expectedResult: true,
+		},
+		{
+			name:       "START packet - datastore HMSET failure",
+			username:   "testuser",
+			sessionID:  "session789",
+			statusType: rfc2866.AcctStatusType_Value_Start,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session789",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "1",
+					"acct_session_id", "session789",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+				).SetErr(fmt.Errorf("Redis connection failed"))
+			},
+			expectedResult: false,
+		},
+		{
+			name:       "START packet - datastore EXPIRE failure",
+			username:   "testuser",
+			sessionID:  "session101",
+			statusType: rfc2866.AcctStatusType_Value_Start,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session101",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "1",
+					"acct_session_id", "session101",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+				).SetVal(true)
+				mock.ExpectExpire("radius:acct:testuser:session101", time.Hour).SetErr(fmt.Errorf("TTL setting failed"))
+			},
+			expectedResult: false,
+		},
+		{
+			name:       "START packet - stream XADD failure",
+			username:   "testuser",
+			sessionID:  "session202",
+			statusType: rfc2866.AcctStatusType_Value_Start,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session202",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "1",
+					"acct_session_id", "session202",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+				).SetVal(true)
+				mock.ExpectExpire("radius:acct:testuser:session202", time.Hour).SetVal(true)
+				mock.ExpectXAdd(&redis.XAddArgs{
+					Stream: "radius:updates:testuser",
+					Values: []interface{}{
+						"key", "radius:acct:testuser:session202",
+						"timestamp", clock.Now().Unix(),
+						"username", "testuser",
+					},
+				}).SetErr(fmt.Errorf("Stream publish failed"))
+			},
+			expectedResult: false,
+		},
+		{
+			name:       "STOP packet - datastore failure",
+			username:   "testuser",
+			sessionID:  "session303",
+			statusType: rfc2866.AcctStatusType_Value_Stop,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session303",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "2", // Stop = 2
+					"acct_session_id", "session303",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+					"acct_input_octets", "1024",
+					"acct_output_octets", "2048",
+					"acct_session_time", "3600",
+				).SetErr(fmt.Errorf("Database unavailable"))
+			},
+			expectedResult: false,
+		},
+		{
+			name:       "STOP packet - stream failure",
+			username:   "testuser",
+			sessionID:  "session404",
+			statusType: rfc2866.AcctStatusType_Value_Stop,
+			setupMock: func(mock redismock.ClientMock) {
+				mock.ExpectHMSet(
+					"radius:acct:testuser:session404",
+					"username", "testuser",
+					"nas_ip_address", "192.168.1.1",
+					"nas_port", "1234",
+					"acct_status_type", "2", // Stop = 2
+					"acct_session_id", "session404",
+					"framed_ip_address", "10.0.0.1",
+					"calling_station_id", "00:11:22:33:44:55",
+					"called_station_id", "00:aa:bb:cc:dd:ee",
+					"packet_type", "Accounting-Request",
+					"timestamp", fmt.Sprintf("%d", clock.Now().Unix()),
+					"acct_input_octets", "1024",
+					"acct_output_octets", "2048",
+					"acct_session_time", "3600",
+				).SetVal(true)
+				mock.ExpectExpire("radius:acct:testuser:session404", time.Hour).SetVal(true)
+				mock.ExpectXAdd(&redis.XAddArgs{
+					Stream: "radius:updates:testuser",
+					Values: []interface{}{
+						"key", "radius:acct:testuser:session404",
+						"timestamp", clock.Now().Unix(),
+						"username", "testuser",
+					},
+				}).SetErr(fmt.Errorf("Stream connection lost"))
+			},
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			redisClient, mock := redismock.NewClientMock()
+			defer redisClient.Close()
+
+			dataStore := datastore.NewRedisStore(redisClient)
+			streamClient := stream.NewRedisStream(redisClient)
+			handler := NewHandler(dataStore, streamClient, time.Hour)
+
+			tt.setupMock(mock)
+
+			request := createAccountingRequest(tt.username, tt.sessionID, tt.statusType)
+			responseWriter := &mockResponseWriter{}
+
+			handler.Handle(responseWriter, request)
+
+			if !responseWriter.written {
+				t.Error("Response was not written - handler should always respond per RADIUS protocol")
+			}
+
+			if responseWriter.response.Code != radius.CodeAccountingResponse {
+				t.Errorf("Expected AccountingResponse code, got %v", responseWriter.response.Code)
+			}
+
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Errorf("There were unfulfilled Redis expectations: %s", err)
+			}
+		})
+	}
 }

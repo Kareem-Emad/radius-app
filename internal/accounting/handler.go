@@ -80,18 +80,20 @@ func (h *Handler) Handle(w radius.ResponseWriter, r *radius.Request) {
 		record.AcctSessionTime = fmt.Sprintf("%d", acctSessionTime)
 	}
 
-	if err := h.storeAccountingData(record); err != nil {
-		log.Printf("[REDIS] Error storing accounting data: %v", err)
-	} else {
-		recordKey := fmt.Sprintf("radius:acct:%s:%s", username, acctSessionId)
-
-		if err := h.publishStreamNotification(username, recordKey); err != nil {
-			log.Printf("[REDIS] Error publishing stream notification: %v", err)
-		}
-	}
-
 	response := r.Response(radius.CodeAccountingResponse)
 	w.Write(response)
+	err := h.storeAccountingData(record)
+	if err != nil {
+		log.Printf("[REDIS] Error storing accounting data: %v", err)
+		return
+	}
+
+	recordKey := fmt.Sprintf("radius:acct:%s:%s", username, acctSessionId)
+	err = h.publishStreamNotification(username, recordKey)
+	if err != nil {
+		log.Printf("[REDIS] Error publishing stream notification: %v", err)
+	}
+
 	log.Printf("[ACCT] Sent Accounting-Response to %v", r.RemoteAddr)
 }
 
