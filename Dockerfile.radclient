@@ -1,0 +1,39 @@
+# Multi-stage build for radclient test container with load generator
+FROM golang:1.24-alpine AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY cmd/loadgenerator/ cmd/loadgenerator/
+COPY pkg/ pkg/
+
+# Build the load generator binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o loadgenerator ./cmd/loadgenerator
+
+# Final stage - Alpine with radclient and load generator
+FROM alpine:latest
+
+# Install freeradius-utils and ca-certificates
+RUN apk add --no-cache freeradius-utils ca-certificates
+
+# Create working directory
+WORKDIR /tools
+
+# Copy the load generator binary from builder stage
+COPY --from=builder /app/loadgenerator .
+
+# Make load generator executable
+RUN chmod +x loadgenerator
+
+# Default command
+CMD sh -c "echo 'radclient test container ready with load generator!' && echo 'Available tools: radclient, ./loadgenerator' && tail -f /dev/null"

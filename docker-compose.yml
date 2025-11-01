@@ -84,7 +84,9 @@ services:
 
   # Test container with radclient for manual testing
   radclient-test:
-    image: alpine:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.radclient
     container_name: radclient-test
     depends_on:
       - radius-server
@@ -97,9 +99,10 @@ services:
       - ./test/auth_request_2.txt:/test/auth_request_2.txt:ro
     command: >
       sh -c "
-        apk add --no-cache freeradius-utils &&
-        echo 'radclient test container ready!' &&
+        echo 'radclient test container ready with load generator!' &&
         echo 'Usage: docker-compose exec radclient-test sh' &&
+        echo 'radclient commands available at /usr/bin/radclient' &&
+        echo 'loadgenerator binary available at /tools/loadgenerator' &&
         tail -f /dev/null
       "
     networks:
