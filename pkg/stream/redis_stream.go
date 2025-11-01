@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	clock "go.llib.dev/testcase/clock"
+
 	"github.com/go-redis/redis/v8"
 )
 
@@ -25,15 +27,10 @@ func NewRedisStream(client *redis.Client) *RedisStream {
 // Push publishes a message to a Redis stream
 func (rs *RedisStream) Push(streamKey string, message StreamMessage) error {
 	// Create stream message with Redis-compatible values
-	values := map[string]interface{}{
-		"key":       message.Key,
-		"timestamp": time.Now().Unix(),
-		"username":  message.Username,
-	}
-
-	// Add any additional data from the message
-	for k, v := range message.Data {
-		values[k] = v
+	values := []interface{}{
+		"key", message.Key,
+		"timestamp", clock.Now().Unix(),
+		"username", message.Username,
 	}
 
 	// Add message to stream

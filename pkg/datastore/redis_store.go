@@ -25,28 +25,28 @@ func NewRedisStore(client *redis.Client) *RedisStore {
 // Save stores an accounting record as a Redis hash with TTL
 func (rs *RedisStore) Save(key string, record AccountingRecord, ttl time.Duration) error {
 	// Convert AccountingRecord to map for Redis hash storage
-	data := map[string]interface{}{
-		"username":           record.Username,
-		"nas_ip_address":     record.NASIPAddress,
-		"nas_port":           record.NASPort,
-		"acct_status_type":   record.AcctStatusType,
-		"acct_session_id":    record.AcctSessionID,
-		"framed_ip_address":  record.FramedIPAddress,
-		"calling_station_id": record.CallingStationID,
-		"called_station_id":  record.CalledStationID,
-		"packet_type":        record.PacketType,
-		"timestamp":          record.Timestamp,
+	data := []interface{}{
+		"username", record.Username,
+		"nas_ip_address", record.NASIPAddress,
+		"nas_port", record.NASPort,
+		"acct_status_type", record.AcctStatusType,
+		"acct_session_id", record.AcctSessionID,
+		"framed_ip_address", record.FramedIPAddress,
+		"calling_station_id", record.CallingStationID,
+		"called_station_id", record.CalledStationID,
+		"packet_type", record.PacketType,
+		"timestamp", record.Timestamp,
 	}
 
 	// Add session metrics if they exist (for STOP records)
 	if record.AcctInputOctets != "" {
-		data["acct_input_octets"] = record.AcctInputOctets
+		data = append(data, "acct_input_octets", record.AcctInputOctets)
 	}
 	if record.AcctOutputOctets != "" {
-		data["acct_output_octets"] = record.AcctOutputOctets
+		data = append(data, "acct_output_octets", record.AcctOutputOctets)
 	}
 	if record.AcctSessionTime != "" {
-		data["acct_session_time"] = record.AcctSessionTime
+		data = append(data, "acct_session_time", record.AcctSessionTime)
 	}
 
 	// Store as hash object

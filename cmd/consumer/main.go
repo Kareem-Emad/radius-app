@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -13,6 +14,23 @@ func main() {
 	cfg, err := config.LoadConsumerConfig()
 	if err != nil {
 		log.Fatalf("Failed to load consumer config: %v", err)
+	}
+
+	consumerGroup := flag.String("group", cfg.ConsumerGroup, "Consumer Group")
+	consumerName := flag.String("name", cfg.ConsumerName, "Consumer Name")
+	username := flag.String("username", cfg.Username, "Username for the consumer")
+
+	flag.Parse()
+
+	if username != nil {
+		cfg.Username = *username
+		cfg.StreamKey = "radius:updates:" + cfg.Username
+	}
+	if consumerGroup != nil {
+		cfg.ConsumerGroup = *consumerGroup
+	}
+	if consumerName != nil {
+		cfg.ConsumerName = *consumerName
 	}
 
 	log.Printf("Starting Redis consumer with config:")

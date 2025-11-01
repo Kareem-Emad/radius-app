@@ -8,6 +8,8 @@ import (
 	"dni/pkg/datastore"
 	"dni/pkg/stream"
 
+	clock "go.llib.dev/testcase/clock"
+
 	"layeh.com/radius"
 	"layeh.com/radius/rfc2865"
 	"layeh.com/radius/rfc2866"
@@ -61,7 +63,7 @@ func (h *Handler) Handle(w radius.ResponseWriter, r *radius.Request) {
 		CallingStationID: callingStationId,
 		CalledStationID:  calledStationId,
 		PacketType:       "Accounting-Request",
-		Timestamp:        fmt.Sprintf("%d", time.Now().Unix()),
+		Timestamp:        fmt.Sprintf("%d", clock.Now().Unix()),
 	}
 
 	if acctStatusType == rfc2866.AcctStatusType_Value_Stop {
@@ -113,9 +115,6 @@ func (h *Handler) publishStreamNotification(username, key string) error {
 	message := stream.StreamMessage{
 		Key:      key,
 		Username: username,
-		Data: map[string]interface{}{
-			"timestamp": time.Now().Unix(),
-		},
 	}
 
 	log.Printf("[REDIS] Publishing to stream: %s", streamKey)

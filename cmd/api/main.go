@@ -29,7 +29,7 @@ func main() {
 	// Create servers using the initialized handlers
 	authServer := &radius.PacketServer{
 		Addr:         cfg.AuthPort,
-		Handler:      radius.HandlerFunc(deps.AuthHandler.Handle),
+		Handler:      radius.HandlerFunc(deps.AcctHandler.Handle),
 		SecretSource: radius.StaticSecretSource(secret),
 	}
 
