@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	clock "go.llib.dev/testcase/clock"
+
 	"dni/pkg/config"
 	"dni/pkg/stream"
 )
@@ -52,7 +54,7 @@ func (c *Consumer) writeLog(message string) error {
 	}
 	defer file.Close()
 
-	timestamp := time.Now().Format("2006-01-02 15:04:05.000000")
+	timestamp := clock.Now().Format("2006-01-02 15:04:05.000000")
 	logEntry := fmt.Sprintf("%s - %s\n", timestamp, message)
 
 	if _, err := file.WriteString(logEntry); err != nil {
