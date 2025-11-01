@@ -156,6 +156,22 @@ docker-compose exec redis redis-cli xinfo GROUPS radius:updates:testuser-1
 docker-compose exec redis-consumer-1 cat /var/log/radius_updates.log
 ```
 
+### Load Testing with Load Generator
+
+```bash
+docker-compose exec radclient-test /tools/loadgenerator -rps=10 -n=100 -username=testuser-1
+
+```
+
+#### Load Generator Options
+
+- `-rps`: Requests per second (default: 10)
+- `-n`: Total number of requests to send (default: 100)
+- `-username`: Username for the requests (default: "username123")
+
+**Note**: The load generator currently only supports RADIUS accounting requests and connects to `radius-server:1813` with the secret `testing123`. It generates randomized session IDs, NAS IP addresses, and alternates between Start and Stop accounting packets.
+
+
 ### Expected Test Flow
 
 #### Authentication Flow (Port 1812)
@@ -179,9 +195,11 @@ dni/
 │   ├── api/               # RADIUS server main application
 │   │   ├── main.go        # Server entry point
 │   │   └── deps.go        # Dependency initialization
-│   └── consumer/          # Redis consumer application
-│       ├── main.go        # Consumer entry point
-│       └── deps.go        # Consumer dependency initialization
+│   ├── consumer/          # Redis consumer application
+│   │   ├── main.go        # Consumer entry point
+│   │   └── deps.go        # Consumer dependency initialization
+│   └── loadgenerator/     # Load testing tool
+│       └── main.go        # Load generator entry point
 ├── internal/              # Private application code
 │   ├── accounting/        # Accounting packet handling
 │   │   └── handler.go     # RADIUS accounting logic
@@ -262,42 +280,77 @@ All services are configured via environment variables:
 
 **Consumer Configuration**:
 - `REDIS_HOST`, `REDIS_PORT`: Redis connection
-- `USERNAME`: User identifier for stream targeting
-- `LOG_FILE`: Output log file path
+- `USERNAME`: User identifier for stream targeting (required)
+- `CONSUMER_GROUP`: Consumer group name (default: "consumer-group-{username}")
+- `CONSUMER_NAME`: Individual consumer name (default: "consumer-{username}-1")
+- `LOG_FILE`: Output log file path (default: "/var/log/radius_updates.log")
+
+**Multiple Consumers Per User**: You can configure multiple consumers for the same user by using the same consumer group but different consumer names. This enables horizontal scaling and load distribution for high-throughput users.
+
+### Consumer Scaling and Configuration
+
+#### Adding Multiple Consumers
+
+You can scale consumers horizontally by adding more consumer instances in the `docker-compose.yml` file. Multiple consumers for the same user will automatically share the workload within the same consumer group.
+
+**Example: Add additional consumers for testuser-1**:
+
+```yaml
+redis-consumer-1-primary:
+  build:
+    context: .
+    dockerfile: Dockerfile.consumer
+  environment:
+    - REDIS_HOST=redis
+    - USERNAME=testuser-1
+    - CONSUMER_GROUP=consumer-group-testuser-1
+    - CONSUMER_NAME=consumer-testuser-1-primary
+    - LOG_FILE=/var/log/radius_updates.log
+  volumes:
+    - ./logs:/var/log
+  depends_on:
+    - redis
+
+redis-consumer-1-secondary:
+  build:
+    context: .
+    dockerfile: Dockerfile.consumer
+  environment:
+    - REDIS_HOST=redis
+    - USERNAME=testuser-1
+    - CONSUMER_GROUP=consumer-group-testuser-1  # Same group
+    - CONSUMER_NAME=consumer-testuser-1-secondary  # Different name
+    - LOG_FILE=/var/log/radius_updates.log
+  volumes:
+    - ./logs:/var/log
+  depends_on:
+    - redis
+```
+
+#### Consumer Command Line Arguments
+
+Consumers can also be configured via command line arguments:
+
+```bash
+./redis-consumer -username=testuser-1 -group=my-group -name=my-consumer
+```
+
+**Available Command Line Arguments:**
+- `-username`: Username for the consumer (overrides `USERNAME` env var)
+- `-group`: Consumer group name (overrides `CONSUMER_GROUP` env var)  
+- `-name`: Individual consumer name (overrides `CONSUMER_NAME` env var)
+
 
 ### Docker Services
 
 - **radius-server**: Main RADIUS server (ports 1812/1813)
 - **redis**: Redis database and streams (port 6379)
-- **redis-consumer-1/2**: Per-user message consumers
+- **redis-consumer-1/2**: Per-user message consumers (scalable)
 - **radclient-test**: Testing container with radclient tools
 
 ## Use of AI
 
-### AI Tool Used
-This project was developed with the assistance of **GitHub Copilot** (Claude-3.5-Sonnet), an AI-powered coding assistant.
-
-### Usage Methodology
-The AI was employed as a **junior developer** in the development process, with a clear focus/drive from me on critical choices that shape the output such as:
-  - Interface design and component interactions
-  - System architecture and separation of concerns
-  - Technology choices and implementation patterns
-  - Review and Refining of the code.
-  - Code generation based on specified requirements and interfaces
-
-### AI-Generated Deliverables
-The following components were primarily influenced by AI assistance, as they represent standard, well-established patterns:
-
-**Infrastructure & Configuration Files**:
-- `Dockerfile` and `Dockerfile.consumer` - Standard multi-stage Docker builds
-- `docker-compose.yml` - Service orchestration configuration
-- `Makefile` - Development workflow automation
-- `redis.conf` - Redis server configuration
-- `.dockerignore` files - Build optimization
-
-**Documentation**:
-- Large portions of `README.md` - Standard project documentation structure
-- AI was used to refine my initial draft of the readme into more structured sections.
+Usage of AI was limited in followup to minimal, only used for limited dicussion on usage options for a specific package for example.
 
 
 ## Troubleshooting

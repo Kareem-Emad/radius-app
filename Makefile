@@ -8,7 +8,7 @@ CONSUMER_MAIN=./cmd/consumer
 .DEFAULT_GOAL := help
 
 # Run targets
-.PHONY: run-server run-consumer
+.PHONY: run-server run-consumer test
 
 run-server: ## Run the RADIUS server
 	@echo "Starting RADIUS server..."
@@ -22,6 +22,9 @@ run-consumer: ## Run the Redis consumer (requires USERNAME env var)
 		exit 1; \
 	fi
 	@USERNAME=$(USERNAME) go run $(CONSUMER_MAIN)
+
+test:
+	go test ./...
 
 # Help target
 .PHONY: help
